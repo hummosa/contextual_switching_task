@@ -36,12 +36,12 @@ def extract_gen_performance(logger, env, ts_before=20, ts_after=0):
         
     return distances_from_mean,inferred_means,mean_abs_errors
 
-def extract_per_std_distance_from_mean(logger, env, ts_before=20, ts_after=0):
+def extract_per_std_distance_from_mean(logger, env, ts_before=20, ts_after=0, abs_dist=False):
     obs = np.stack(logger.timestep_data['obs']).squeeze()
     preds = np.stack(logger.timestep_data['predictions']).squeeze()
     if preds.shape[-1] == 2:
         preds = preds[:,:1]
-# if you get logger.timestep_data['context_name'] at [switch] you get the name of the upcoming context after the switch 
+    # if you get logger.timestep_data['context_name'] at [switch] you get the name of the upcoming context after the switch 
     switches_ts = env.env_logger['switches_ts']
     switches_ts = np.array(switches_ts)
     mean_diff = []
@@ -51,7 +51,7 @@ def extract_per_std_distance_from_mean(logger, env, ts_before=20, ts_after=0):
     switch_triggered_distance_from_mean = defaultdict(list)
     for i, switch in enumerate(switches_ts[1:]): # ignore the first and last switch
         if len (obs[switch-ts_before:switch+ts_after]) == ts_before+ts_after:
-            mean_diff.append(np.abs((obs[switch-ts_before:switch+ts_after] - preds[switch-ts_before:switch+ts_after])))
+            # mean_diff.append(np.abs((obs[switch-ts_before:switch+ts_after] - preds[switch-ts_before:switch+ts_after])))
         # so to get the id of the context before the switch you need to get the context name at the switch -1
             switch_to_context_name = logger.timestep_data['context_names'][switch]
             switch_from_context_name = logger.timestep_data['context_names'][switch-1]
@@ -59,9 +59,13 @@ def extract_per_std_distance_from_mean(logger, env, ts_before=20, ts_after=0):
                 next_mean = env.envs[switch_to_context_name]['kwargs']['mean']
                 previous_mean = env.envs[switch_from_context_name]['kwargs']['mean']
                 previous_std = env.envs[switch_from_context_name]['kwargs']['std']
-                # measure = np.abs((preds[switch-ts_before:switch+ts_after] - next_mean))
-                measure_previous = np.abs((preds[switch-ts_before:switch] - previous_mean))
-                measure_next = np.abs((preds[switch:switch+ts_after] - next_mean))
+
+                if abs_dist:
+                    measure_previous = np.abs((preds[switch-ts_before:switch] - previous_mean))
+                    measure_next = np.abs((preds[switch:switch+ts_after] - next_mean))
+                else:
+                    measure_previous = -((preds[switch-ts_before:switch] - previous_mean))
+                    measure_next = ((preds[switch:switch+ts_after] - next_mean))
                 measure = np.concatenate((measure_previous, measure_next))
                 switch_triggered_distance_from_mean[previous_std].append(measure)
     
@@ -73,15 +77,54 @@ def extract_per_std_distance_from_mean(logger, env, ts_before=20, ts_after=0):
         
     # return distances_from_mean,inferred_means,mean_abs_errors
     return switch_triggered_distance_from_mean
-   
+
+def extract_per_std_distance_from_mean_v2(logger, env, ts_before=20, ts_after=0, abs_dist=True):
+    ''' flipping the experiment to be from base Gauss to variable STD block '''
+    obs = np.stack(logger.timestep_data['obs']).squeeze()
+    preds = np.stack(logger.timestep_data['predictions']).squeeze()
+    if preds.shape[-1] == 2:
+        preds = preds[:,:1]
+    # if you get logger.timestep_data['context_name'] at [switch] you get the name of the upcoming context after the switch 
+    switches_ts = env.env_logger['switches_ts']
+    switches_ts = np.array(switches_ts)
+    mean_diff = []
+    switch_triggered_distance_from_mean = defaultdict(list)
+    for i, switch in enumerate(switches_ts): 
+        if len (obs[switch-ts_before:switch+ts_after]) == ts_before+ts_after:
+            # mean_diff.append(np.abs((obs[switch-ts_before:switch+ts_after] - preds[switch-ts_before:switch+ts_after])))
+            # But using error is not helpful becuase it is not normalized by the std of the data. 
+            # So instead get the true mean before and after the switch and measure the distance from that mean
+            switch_to_context_name = logger.timestep_data['context_names'][switch]
+            switch_from_context_name = logger.timestep_data['context_names'][switch-1]
+
+            if switch_from_context_name == 'base_gauss' and switch_to_context_name != 'base_gauss':
+                from_mean = env.envs[switch_from_context_name]['kwargs']['mean']
+                to_mean = env.envs[switch_to_context_name]['kwargs']['mean']
+                # from_std = env.envs[switch_from_context_name]['kwargs']['std']
+                to_std = env.envs[switch_to_context_name]['kwargs']['std']
+                if abs_dist:
+                    distance_from_mean_before_switch = np.abs((preds[switch-ts_before:switch] - from_mean))
+                    distance_from_mean_after_switch = np.abs((preds[switch:switch+ts_after] - to_mean))
+                else:
+                    distance_from_mean_before_switch = ((preds[switch-ts_before:switch] - from_mean))
+                    distance_from_mean_after_switch = -((preds[switch:switch+ts_after] - to_mean))
+
+                distance_from_mean = np.concatenate((distance_from_mean_before_switch, distance_from_mean_after_switch))
+                switch_triggered_distance_from_mean[to_std].append(distance_from_mean)
+
+                
+    return switch_triggered_distance_from_mean
+
+
+
 def plot_switch_triggered_per_std_distance_from_mean(switch_triggered_distance_from_mean, ax, params= None, cmap=plt.cm.viridis, ts_before=20, ts_after=40):
-    colors = cmap(np.linspace(0, 1, 3+5))
+    colors = cmap(np.linspace(0, 1, 5+2))#+3)) 
     for i, (std, distances) in enumerate(switch_triggered_distance_from_mean.items()):
         if std != 0.0:
             color = colors[i]
-            ax.plot(range(-ts_before, np.stack(distances).shape[1]-ts_before) , -np.mean(np.stack(distances), axis=0), label=f'STD {std}', linewidth=0.5, color=color)
-    ax.legend(loc='lower right', fontsize=6, ncol=1)
-    ax.set_xlim([-5,20])
+            ax.plot(range(-ts_before, np.stack(distances).shape[1]-ts_before) , np.mean(np.stack(distances), axis=0), label=f'STD {std}', linewidth=0.5, color=color)
+    # ax.legend(loc='lower right', fontsize=6, ncol=1)
+    # ax.set_xlim([-5,20])
     # ax.set_xticklabels([-5,0,5,10,15,20])
     # ax.set_yticklabels([0.0,0.2,0.4,0.6, 0.8][::-1])
     ax.axvline(0, linewidth=0.5, color='k', linestyle='--')
@@ -89,7 +132,7 @@ def plot_switch_triggered_per_std_distance_from_mean(switch_triggered_distance_f
         ax.set_title(params, fontsize=6)
     axes_labels(ax,'Time steps from switch','Preds distance from mean')
     # ax.grid(color='k', linestyle='--', linewidth=0.1, alpha=0.5)
-    ax.set_ylim([-.43,0])
+    ax.set_ylim([.5,0])
 
 
     # plot inferred means
@@ -175,7 +218,9 @@ def plot_combined_behavior_and_histograms(logger, env, fig_height=4, ylim=1000):
     switches_ts_padded = env.env_logger['switches_ts'] + [logger.timestep_data['timestep_i'][-1]]
     axes_labels(ax, '', 'Observations')
     ax.set_xticklabels([])
-    ax.set_xlim(switches_ts_padded[sid1] - 100, switches_ts_padded[sid1])
+    # ax.set_xlim(switches_ts_padded[sid1] - 100, switches_ts_padded[sid1])
+    ax.set_xlim(switches_ts_padded[sid1] - 100, switches_ts_padded[sid1] + 20)
+    ax.axvspan(switches_ts_padded[sid1] -100, switches_ts_padded[sid1], alpha=0.1, color='grey')
 
     # Plot the 5th subplot from plot_behavior_novel_contexts
     ax = axes[1, 0]
@@ -183,7 +228,10 @@ def plot_combined_behavior_and_histograms(logger, env, fig_height=4, ylim=1000):
     ax.plot(preds, 'o', label='preds', markersize=0.5, color=preds_color)
     axes_labels(ax, 'Time steps', 'Observations')
     ax.set_xticklabels([])
-    ax.set_xlim(switches_ts_padded[sid2]-100, switches_ts_padded[sid2] )
+    # ax.set_xlim(switches_ts_padded[sid2]-100, switches_ts_padded[sid2] )
+    ax.set_xlim(switches_ts_padded[sid2]-100, switches_ts_padded[sid2]+20 )
+    ax.axvspan(switches_ts_padded[sid2] , switches_ts_padded[sid2]+20, alpha=0.1, color='grey') 
+
     ax.set_ylim(-.2, 2.)
 
     # Plot the 4th subplot from plot_histograms_novel_contexts
@@ -201,7 +249,7 @@ def plot_combined_behavior_and_histograms(logger, env, fig_height=4, ylim=1000):
     context_mean = env.envs[switch_to_context_name]['kwargs']['mean']
     context_std = env.envs[switch_to_context_name]['kwargs']['std']
     # ax.set_xlabel(f'{context_mean:.2f}±{context_std:.2f}')
-
+    ax.axvspan(ax.get_xlim()[0], ax.get_xlim()[1],alpha=0.1, color='grey')
     # Plot the 5th subplot from plot_histograms_novel_contexts
     ax = axes[1, 1]
     preds = np.stack(logger.timestep_data['predictions']).squeeze()
@@ -242,7 +290,10 @@ def plot_behavior_novel_contexts(logger, env,fig_height = 1.0):
     
     axes_labels(ax,'Time steps','Observations')
     ax.set_xticklabels([])
-    ax.set_xlim(switches_ts_padded[7]-100, switches_ts_padded[7] )
+    # ax.set_xlim(switches_ts_padded[7]-100, switches_ts_padded[7] )
+
+    ax.set_xlim(switches_ts_padded[6]-10, switches_ts_padded[6]+100 )
+    ax.axvspan(switches_ts_padded[6]-10, switches_ts_padded[6], alpha=0.1, color='grey')
 
     ax = axes[1]
     ax.plot(obs, 'o', label='obs', markersize=0.5, color=obs_color)
@@ -251,7 +302,10 @@ def plot_behavior_novel_contexts(logger, env,fig_height = 1.0):
     # ax.legend(fontsize=6,)# loc='upper left')#loc=(.3,1.2))
     axes_labels(ax,'Time steps','Observations')
     ax.set_xticklabels([])
-    ax.set_xlim(switches_ts_padded[7], switches_ts_padded[7] + 150)
+    # ax.set_xlim(switches_ts_padded[7], switches_ts_padded[7] + 150)
+    ax.set_xlim(switches_ts_padded[7]-10, switches_ts_padded[7] + 140)
+    ax.axvspan(switches_ts_padded[7]-10, switches_ts_padded[7], alpha=0.1, color='grey')
+
     ax.set_ylim(-.5,2.5)
     plt.tight_layout()
 

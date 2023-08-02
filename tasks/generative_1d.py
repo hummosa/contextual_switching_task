@@ -101,17 +101,16 @@ class Generative_1d_uniform(gym.Env):
         self.current_obs = self.sample_obs()
         return self.current_obs.astype(float)
         
-class Generative_playground(gym.Env):
+class Generative_environment(gym.Env):
     """
-    Defines a generative environment for self supervised learning and RL.
-    It has a nomber of sub environments or datasets and it samples data from them and serves it to the agent.
-    It returns a next state, which can be used for ssl, and reward, for RL. I can see returning state as a (x,y) tuple for SL
-    
-    Can create a new env with a new set of sub environments, and can be used for adaptation, by passing adapt_env=True
+    Environment is meant to hold a number of tasks, and switch between them.
+    It serves trials to the agent from the appropriate task.
+    It takes a Config file which has listed the names of the tasks, and their constructors and kwargs.
+     This part is a bit rudementary really because I have only two tasks Gaussian and Uniform, and I just hard coded them in.
     """
-    def __init__(self, config, adapt_env=False, novel_mean=0, novel_std=0.1, **kwargs):
+    def __init__(self, config, experiment=0, novel_mean=0, novel_std=0.1, **kwargs):
         super().__init__()
-        self.adapt_env = adapt_env
+        self.experiment = experiment
         self.input_size = config.input_size
         self.action_size, self.output_size = config.action_size, config.action_size # alias
         self.observation_space =  gym.spaces.Box(low=-np.inf, 
@@ -130,14 +129,8 @@ class Generative_playground(gym.Env):
 
         self.no_of_tasks = len(config.env_names)
 
-        # Define a dictionary of tasks, each with an id, constructor and kwargs, allowing the config file of the experiment to pick tasks by name
-        # task_dicts = {
-        #     'gauss1': {'env_id': 0, 'env_constructor': Generative_1d_gauss, 'kwargs': config.env_kwargs[config.env_names[0]]},
-        #     'gauss2': {'env_id': 1, 'env_constructor': Generative_1d_gauss, 'kwargs': config.env_kwargs[config.env_names[1]]},
-        #     'gauss3': {'env_id': 2, 'env_constructor': Generative_1d_gauss, 'kwargs': config.env_kwargs[config.env_names[2]]},
-        #     # 'gauss4': {'env_id': 3, 'env_constructor': Generative_1d_gauss, 'kwargs': config.env_kwargs[config.env_names[3]]},
-        # }
-        # rewrite the task dict in a for loop:
+        
+        # Define the tasks, and their ids, constructors and kwargs
         task_dicts = dict()
         for task_name in config.env_names:
             env_id = np.argwhere(np.array(config.env_names)==task_name)[0][0]
@@ -148,13 +141,9 @@ class Generative_playground(gym.Env):
                                     'env_constructor': Generative_1d_gauss, 
                                     'kwargs': config.env_kwargs[task_name]}
             
-
-
+            
         # define the tasks to be used in the experiment
-        self.experiment_tasks = config.env_names 
-        # update task_dict with self.config.env_kwargs
-        for task_name in self.experiment_tasks:
-            task_dicts[task_name].update({'kwargs': config.env_kwargs[task_name]})
+        self.experiment_tasks = config.env_names # currently using all. But it could be a subset to train on and a subset to test on.
 
         # instantiate the tasks
         self.envs = dict()
@@ -164,10 +153,11 @@ class Generative_playground(gym.Env):
             task.update({'env_instant': task['env_constructor'](self.config, **kwargs)})
             self.envs[task_name] = task
 
-        if adapt_env==1: 
-            # self.envs= self.adapt_envs
+        # construct each experiment based on the experiment integer passed. Expect messiness ahead. 
+        if experiment==1: 
+            # self.envs= self.experiments
             pass
-        elif adapt_env == 2: # add novel env 
+        elif experiment == 2: # add novel env 
             novel_env_kwargs= {'gauss4':  {'env_id': 3, 'env_constructor': Generative_1d_gauss, 'kwargs': {'mean': novel_mean, 'std': novel_std},  }}
             self.novel_envs = dict()
             for name, task in novel_env_kwargs.items():
@@ -176,7 +166,7 @@ class Generative_playground(gym.Env):
                 self.novel_envs[name] = task
             self.envs.update(self.novel_envs)
 
-        elif adapt_env == 3: # Testing generalization systematically betwee -0.2 to 1.2
+        elif experiment == 3: # Testing generalization systematically betwee -0.2 to 1.2
             means = np.array(list(range(-2, 13)))/10
             novel_env_kwargs= {f'gauss{i}': {'mean': means[i], 'std': novel_std} for i in range(len(means))}
             self.novel_envs = defaultdict(dict)
@@ -186,7 +176,7 @@ class Generative_playground(gym.Env):
                 kwargs = task_d['kwargs'] 
                 task_d.update({'env_instant': task_d['env_constructor'](self.config, **kwargs) })
             self.envs= self.novel_envs
-        elif adapt_env == 6: # Testing VARIANCE generalization systematically betwee 0.1 to 0.5
+        elif experiment == 6: # Testing VARIANCE generalization systematically betwee 0.1 to 0.5
             # base block:
             self.novel_envs = defaultdict(dict)
             base_env_kwargs= {f'base_gauss': {'mean': self.config.default_mean1, 'std': self.config.default_std}}
@@ -199,7 +189,7 @@ class Generative_playground(gym.Env):
                 kwargs = task_d['kwargs'] 
                 task_d.update({'env_instant': task_d['env_constructor'](self.config, **kwargs) })
             self.envs= self.novel_envs
-        elif adapt_env == 4: # Testing single run generalization
+        elif experiment == 4: # Testing single run generalization
             self.interesting_envs = defaultdict(dict)
             self.interesting_envs['uniform2'] = {'env_id':0, 'env_constructor': Generative_1d_uniform, 'kwargs': {'mean': 0.0, 'std': 1.0}} # Really min and max
             self.interesting_envs['gauss2'] = {'env_id':1, 'env_constructor': Generative_1d_gauss, 'kwargs': {'mean': 0.0, 'std': 0.3}} #
@@ -227,6 +217,10 @@ class Generative_playground(gym.Env):
         self.trials_remaining_in_block = 20 # TODO define better if this option gets used
 
     def context_transition_update(self):
+        '''
+        updates the current context, and logs the ts of the transition
+
+        '''
         for training_phase in self.config.training_phases:
             if self.ts_i == training_phase['start_ts']:
                 self.config.update(training_phase['config']) # load the relevant config for this training phase
@@ -255,7 +249,7 @@ class Generative_playground(gym.Env):
 
                 self.block_i += 1
                 self.env_logger['switches_ts'].append(self.ts_i)
-        elif self.config.context_transition_function == 'base_block_alternating': # alternates between some base block, and all overs.
+        elif self.config.context_transition_function == 'base_block_alternating': # alternates between some base block, and all others.
             self.trials_remaining_in_block -=1
             if self.trials_remaining_in_block==0:
                 context_options = list(self.envs.keys())
@@ -299,7 +293,8 @@ class Generative_playground(gym.Env):
     def step(self, action):
         '''
         step function
-        obs output is in torch, and has dims batch_size x input_dim1 x input_dim2
+        obs output is in torch, and has dims batch_size x input_dim1 x input_dim2   # though I never ended up using input_dim2. 
+        info gathers all the relevant info for logging and debugging, but also I use it to pass the context one-hot encoded vector to the agent.
         '''
         if self.config.capture_variance_experiment or self.config.shrew_modifications:
             action = action[:,:, :1] # only use first action
@@ -318,7 +313,7 @@ class Generative_playground(gym.Env):
             oh_current_cxt = np.zeros((1, self.config.batch_size,self.config.thalamus_size))
             oh_current_cxt[0, :, current_cxt_id] = 1.0
         elif self.config.context_signal_type == 'compositional':
-            # context_representations : four tasks. Convert the index to two-hot representation of the context
+            # This is for the additional experiment where the models are trained on two different means, but also no two different stds. Compsitional means splitting up the context signal into two parts, one for mean and one for std. As opposed to one-hot where each combination of mean and std gets one unique value.
             # the first two dims are 1, 0 for the first two tasks, and 0, 1 for the last two tasks. the last 2 dims are 1, 0 for tasks 1 and 3, and 0, 1 for tasks 2 and 4.
             current_cxt_id = self.envs[self.current_context]['env_id'] # integer id for env
             oh_current_cxt = np.ones((1, self.config.batch_size,self.config.thalamus_size))*0.3 # avoid zeros
@@ -349,7 +344,7 @@ class Generative_playground(gym.Env):
         self.ts_i +=1
         self.ts_in_trial +=1
         total_blocks = self.config.no_of_blocks
-        # if self.adapt_env ==3: total_blocks = 8
+        # if self.experiment ==3: total_blocks = 8
         done = True if self.block_i == total_blocks else False
         return obs, float(reward), done, info
     
