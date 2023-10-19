@@ -3,7 +3,7 @@ import torch
 import numpy as np
 
 
-def adapt_model_v2(model, env,  _use_oracle, config, optimizer, horizon, criterion, ts_in_training, logger, _use_optimized_thalamus=False, bayesian_likelihoods = None, bayesian_posteriors = None):
+def adapt_model_v2(model, env,  _use_oracle, config, optimizer, horizon, criterion, ts_in_training, logger, _use_optimized_thalamus=False, bayesian_likelihoods = None, bayesian_posteriors = None, prespecified_thalamus = None, use_buffer_thalamus = False, input_distort = False):
     """
     Adapt the model to the current environment. Adaptation can be by changing the model parameters (traditional training) or by changing the thalamus (MD) inputs (gradient-based inference).
     This depends on the optimizer passed to this function and what parameters it is optimizing. 
@@ -40,7 +40,8 @@ def adapt_model_v2(model, env,  _use_oracle, config, optimizer, horizon, criteri
         horizon_obs = torch.from_numpy(np.stack(horizon_obs).squeeze(1)).float().to(model.device)
 
         model.hidden= (hidden[0].detach(),hidden[1].detach())
-
+        if input_distort:
+            horizon_obs = horizon_obs + torch.randn_like(horizon_obs)*0.8
         output, hidden = model(input=horizon_obs, reward = None, thalamic_inputs=thalamic_inputs,)
         obs, reward, done, info = env.step(output[-1:].detach().cpu().numpy())
         obs = torch.tensor(obs).float().to(model.device)
@@ -48,6 +49,12 @@ def adapt_model_v2(model, env,  _use_oracle, config, optimizer, horizon, criteri
         # prepare the thalamic inputs for the next timestep.
         # model expects a tensor of shape (horizon, batch_size, thalamus_size)
         # or (1, batch_size, thalamus_size) if a slow evolving thalamus (level II) and it will be repeated
+
+        # Timing and order is very tricky here. 
+        # So first obs and thalamus are uniform. 
+        # Model makes a prediction about the next obs,
+        # We step the env to get that next obs (referred to as obs).
+        # Thalamus input should be for this next obs. The env provides it during learning the model.
         if _use_oracle: 
             thalamic_inputs_current = torch.from_numpy(info['context_oh']).float().to(model.device)
             # I had to add the +1 here because I'm including all the buffer AND the current value below, so asking one less from buffer.
@@ -64,11 +71,17 @@ def adapt_model_v2(model, env,  _use_oracle, config, optimizer, horizon, criteri
                 thalamic_inputs = thalamic_inputs_current
             else: # use one value per timestep
                 thalamic_inputs = torch.cat((thalamic_inputs_buffer, thalamic_inputs_current), axis=0)
-
+        elif use_buffer_thalamus: # grab values from the buffer, though these are delayed by one timestep, so add one uniform value at the end
+            thalamic_inputs_buffer = torch.from_numpy(np.stack(logger.timestep_data['thalamus'][-logger.horizon+1:]).squeeze(1)).float().to(model.device)
+            thalamic_inputs = torch.cat((thalamic_inputs_buffer, torch.ones(1,1,config.thalamus_size).float().to(model.device)/config.thalamus_size), axis=0)
+        elif prespecified_thalamus is not None: # take thalamic values inferred from previous round, but advance them by a step because they are helping predict the next value?
+            # or current obs is to be predicted from the last thalamic value?
+            current_ts = len(logger.timestep_data['obs']) +1 # this current_ts is the one already predicted. We need the next thalamus for the current obs that is to be predicted yet
+            thalamic_inputs = torch.from_numpy(prespecified_thalamus[max(0,current_ts-horizon): current_ts].squeeze(1)).float().to(model.device)
         elif bayesian_posteriors is not None:
             current_ts = len(logger.timestep_data['obs'])
             thalamic_inputs = torch.from_numpy(bayesian_posteriors[current_ts:current_ts+1]).float().to(model.device)
-        else:
+        else: # if nothing else. use a uniform thalamus
             thalamic_inputs = torch.ones(obs.shape[0], obs.shape[1], config.thalamus_size).float().to(model.device)/config.thalamus_size
         
         optimizer.zero_grad()

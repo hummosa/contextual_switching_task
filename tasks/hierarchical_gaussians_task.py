@@ -146,7 +146,7 @@ class Generative_environment(gym.Env):
             
         # define the tasks to be used in the experiment
         self.experiment_tasks = config.env_names # currently using all. But it could be a subset to train on and a subset to test on.
-
+        self.experiment = experiment
         # instantiate the tasks
         self.envs = dict()
         for task_name in self.experiment_tasks:
@@ -212,6 +212,18 @@ class Generative_environment(gym.Env):
             for env_name, task_d in self.envs.items():
                 kwargs = task_d['kwargs'] 
                 task_d.update({'env_instant': task_d['env_constructor'](self.config, **kwargs) })
+        elif experiment==8: # fixed random sequences over 3 blocks and randomly mean picked from 3 values for each block.
+            self.envs = defaultdict(dict)
+            self.means = [0.2, 0.8, 0.5]
+            self.seq1 = [1,2,3] # a sequence of rng seeds
+            self.seq2 = [4,5,6] # a sequence of rng seeds
+            for i, mean in enumerate(self.means):
+                self.envs[f'gauss{i}'] = {'env_id':0, 'env_constructor': Generative_1d_gauss, 'kwargs': {'mean': mean, 'std': self.config.default_std}}
+            for env_name, task_d in self.envs.items():
+                kwargs = task_d['kwargs'] 
+                task_d.update({'env_instant': task_d['env_constructor'](self.config, **kwargs) })
+
+
 
         # self.novel_envs = dict({'env_name': 'env_class_constroctor'}) # samples from novel tasks not see in training
         self.no_of_tasks = len(self.envs) #  TODO need to add test and novel envs later
@@ -296,7 +308,7 @@ class Generative_environment(gym.Env):
                 self.trials_remaining_in_block = self.config.max_trials_per_block
                 self.block_i += 1
                 self.env_logger['switches_ts'].append(self.ts_i)
-        elif self.config.context_transition_function == 'two_sequences': # alternates between two sequences with 3 contexts.
+        elif self.config.context_transition_function == 'two_sequences' or self.experiment==7: # alternates between two sequences with 3 contexts.
             self.trials_remaining_in_block -=1
             if self.trials_remaining_in_block==0:
                 # determine which context to use within sequence
@@ -306,7 +318,24 @@ class Generative_environment(gym.Env):
                 self.trials_remaining_in_block = self.config.max_trials_per_block
                 self.block_i += 1
                 self.env_logger['switches_ts'].append(self.ts_i)
-
+        elif self.config.context_transition_function == 'fixed_random_sequences' or self.experiment ==8: # alternates between two fixed random sequences each 3 blocks long, but randomly samples the means inside each block choosen from the three gaussians defined
+            self.trials_remaining_in_block -=1
+            if self.trials_remaining_in_block==0:
+                # determine if seq1 or seq2 and the position in the sequence
+                sequence_position = self.block_i % (len(self.seq1))
+                sequence_type = self.block_i % (len(self.seq1)*2) < len(self.seq1) # 0 or 1
+                self.current_context = self.rng.choice(list(self.envs.keys()), replace=True)
+                if sequence_type == 0: # seq1
+                    # set the rng of the gaussian task class to self.seq1[sequence_position]
+                    self.envs[self.current_context]['env_instant'].rng = np.random.RandomState(self.config.seed + int(self.seq1[sequence_position]))
+                elif sequence_type == 1: # seq2
+                    # set the rng of the gaussian task class to self.seq2[sequence_position]
+                    self.envs[self.current_context]['env_instant'].rng = np.random.RandomState(self.config.seed + int(self.seq2[sequence_position]))
+                # print(f'sequence_type: {sequence_type}, sequence_position: {sequence_position}, self.current_context: {self.current_context}')
+                self.trial_in_block = 0
+                self.trials_remaining_in_block = self.config.max_trials_per_block
+                self.block_i += 1
+                self.env_logger['switches_ts'].append(self.ts_i)
     
     def new_trial(self):
         self.trial_i +=1
