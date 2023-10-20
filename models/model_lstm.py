@@ -8,15 +8,22 @@ class LSTM_model(nn.Module):
     def __init__(self, config, hidden_size):
         super().__init__()
         self.input_size = config.input_size
+        self.config = config
         self.hidden_size = hidden_size
         self.output_size = config.output_size
-        self.lstm = nn.LSTM(hidden_size, hidden_size, batch_first=False)
+        if self.config.rnn_type == 'LSTM':
+            self.rnn = nn.LSTM(hidden_size, hidden_size, batch_first=False)
+        elif self.config.rnn_type == 'RNN':
+            self.rnn = nn.RNN(hidden_size, hidden_size, batch_first=False)
+
         self.linear_in = nn.Linear(self.input_size, self.hidden_size, )
         self.linear_out = nn.Linear(self.hidden_size, self.output_size)
-        self.config = config
         self.device = self.config.device
         self.init_hidden()
         self.to(self.device)
+
+        weights = [p for n,p in self.named_parameters() if n !='thalamus']
+        self.WU_optimizer = torch.optim.Adam(weights, lr=self.config.WU_lr)
 
         self.thalamus_size = config.no_of_contexts
         self.register_parameter(name='thalamus',param=torch.nn.Parameter(torch.ones([self.config.seq_size,self.config.batch_size,self.thalamus_size])/self.thalamus_size ,requires_grad = True))
@@ -24,20 +31,25 @@ class LSTM_model(nn.Module):
         ### not sure why above is not working
         self.thalamus.data = self.thalamus.data.to(self.device)
         ### had to do the above to move it...
-        self.LU_optimizer = torch.optim.Adam([self.get_parameter('thalamus')], lr=self.config.LU_lr)
+        self.LU_optimizer = self.get_LU_optimizer()
         if self.config.thalamus_activation_function == 'softmax':
             self.thalamus_activation_function = self.thalamus_activation_function_softmax
         elif self.config.thalamus_activation_function == 'none':
             self.thalamus_activation_function = self.thalamus_activation_function_none
-
+    def get_LU_optimizer(self):
+        LU_optimizer = torch.optim.SGD([self.thalamus], lr=self.config.LU_lr, momentum=self.config.momentum)
+        return LU_optimizer
     def thalamus_activation_function_softmax(self, x):
         # return x 
         return torch.softmax(x, dim = -1) # note: 0, 1 becomes 0.2689, 0.7311
     def thalamus_activation_function_none(self, x):
         return x 
     def init_hidden(self):
-        self.hidden = (torch.zeros(1, self.config.batch_size, self.hidden_size).to(self.device),
+        if self.config.rnn_type == 'LSTM':
+            self.hidden = (torch.zeros(1, self.config.batch_size, self.hidden_size).to(self.device),
                        torch.zeros(1, self.config.batch_size, self.hidden_size).to(self.device))
+        elif self.config.rnn_type == 'RNN':
+            self.hidden = torch.zeros(1, self.config.batch_size, self.hidden_size).to(self.device)
 
     def forward(self, input, hidden= None, reward = None, thalamic_inputs=None):
         '''
@@ -70,6 +82,10 @@ class LSTM_model(nn.Module):
 
         self.thalamus.data = thalamic_inputs.to(self.device)
 
+        # If thalamus changes its dim, it has to be redefined as a parameter, and reattached to optimizer
+        self.thalamus = torch.nn.Parameter(self.thalamus.data, requires_grad = True)
+        self.LU_optimizer = self.get_LU_optimizer()
+        
         try:
             input = torch.cat([input, self.thalamus_activation_function(self.thalamus)], dim=2)
         except:
@@ -83,7 +99,7 @@ class LSTM_model(nn.Module):
         if hidden is None:
             hidden = self.hidden
         input = self.linear_in(input)
-        output, hidden = self.lstm(input, hidden)
+        output, hidden = self.rnn(input, hidden)
         self.hidden = hidden # update the hidden state with the new hidden state, if no hidden state is passed excplicitly to forward, this will be used next call
         output = self.linear_out(output)
         return output, hidden

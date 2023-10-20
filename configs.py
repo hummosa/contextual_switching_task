@@ -21,6 +21,7 @@ class Config():
         self.ablate_context_signal = False
         self.l2_loss = False
         self.gradient_clipping = 0
+        self.backprop_only_last_timestep = False
         self.default_mean1 = 0.2
         self.default_mean2 = 0.8
         self.default_std = 0.2
@@ -54,11 +55,14 @@ class Config():
 
         # Model parameters
         self.lr  = 0.0005
-        self.LU_lr = 0.01
+        self.LU_lr = 0.3
+        self.WU_lr = 0.001
+        self.momentum = 0.5
+        self.rnn_type = 'LSTM' # 'LSTM' or 'RNN'
         # self.lr_pi           = 0.0005
-        self.lr_pi           = 0.001
-        self.lr_q            = 0.001
-        self.latent_lr = 1e-1
+        # self.lr_pi           = 0.001
+        # self.lr_q            = 0.001
+        # self.latent_lr = 1e-1
         self.latent_decay = 0.9
         self.hidden_size = 64
         self.no_of_hypothesis = 5
