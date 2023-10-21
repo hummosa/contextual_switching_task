@@ -38,6 +38,7 @@ class Config():
         self.use_thalamus = False # to use thalamus withouth the oracle
         self.reward_fn = lambda y,x: x-y
         self.thalamus_activation_function = 'softmax' # 'softmax' or 'none'
+        self.accummulate_thalamus_temporally = False
         
         self.batch_size = 1 # to simulate human cognition experience, but can later increase for efficiency
         self.seq_size = 1 #
@@ -54,7 +55,7 @@ class Config():
         self.training_blocks = 20
 
         # Model parameters
-        self.lr  = 0.0005
+        # self.lr  = 0.0005
         self.LU_lr = 0.3
         self.WU_lr = 0.001
         self.momentum = 0.5
@@ -68,7 +69,6 @@ class Config():
         self.no_of_hypothesis = 5
         self.latent_shape = 10
         self.activation_fxn = 'relu'
-        self.rnntype = 'LSTM'
         self.seed = 2
 
         #Hyperparameters

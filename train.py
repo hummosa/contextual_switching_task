@@ -226,12 +226,15 @@ def adapt_model_v3(model, env,  _use_oracle, config, optimizer_to_use, horizon, 
         if bayesian_likelihoods is not None:
             thalamus_grads = torch.from_numpy(bayesian_likelihoods).float().to(model.device)
             model.thalamus.grad = thalamus_grads
+        if config.accummulate_thalamus_temporally:
+            model.thalamus.grad[-1] += torch.sum(model.thalamus.grad, dim=0)
         optimizer.step()
         if len(horizon_obs) == horizon:
             uwhydoIhavetohavealine= False
 
         # update info with the gradient of the model thalamus. Since model.thlalamus is len seq, take only last timestep
         if model.thalamus.grad is not None: info.update({'thalamus_grad': model.thalamus.grad[-1:].detach().clone().cpu().numpy()})
+        # if model.thalamus.grad is not None: info.update({'thalamus_grad': model.thalamus.grad.sum(0).detach().clone().cpu().numpy()})
         info.update({'thalamus': model.thalamus[-1:].detach().cpu().numpy()})
         info.update({'predictions': output[-1:].detach().cpu().numpy(), 
         'hidden': [h.detach().cpu().numpy() for h in hidden], 'loss':  criterion(output[-1:], obs).item(),            })

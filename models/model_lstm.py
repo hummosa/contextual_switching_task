@@ -80,11 +80,13 @@ class LSTM_model(nn.Module):
         # if thalamic_inputs.shape[1] < input.shape[1]: # repeat along batch dimension
         #     thalamic_inputs = thalamic_inputs.repeat(1,input.shape[1],1)
 
-        self.thalamus.data = thalamic_inputs.to(self.device)
-
-        # If thalamus changes its dim, it has to be redefined as a parameter, and reattached to optimizer
-        self.thalamus = torch.nn.Parameter(self.thalamus.data, requires_grad = True)
-        self.LU_optimizer = self.get_LU_optimizer()
+        # check if thalamus has changed its dim, if so, redefine it as a parameter, and reattach to optimizer
+        if thalamic_inputs.shape != self.thalamus.shape:
+            self.thalamus = torch.nn.Parameter(thalamic_inputs, requires_grad = True)
+            self.thalamus.data = self.thalamus.data.to(self.device)
+            self.LU_optimizer = self.get_LU_optimizer()
+        else:
+            self.thalamus.data = thalamic_inputs.to(self.device)
         
         try:
             input = torch.cat([input, self.thalamus_activation_function(self.thalamus)], dim=2)
