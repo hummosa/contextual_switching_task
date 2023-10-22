@@ -9,6 +9,262 @@ obs_color = 'tab:grey'
 preds_color = 'tab:red'
 
 figure_dpi = 600
+def plot_modulations(testing_memory_buffer, testing_env, testing_losses, config, x1=50, x2=np.inf, latent_dim = 0 ):
+    # now get the gradients from the memory buffer
+    grads = np.stack(testing_memory_buffer.timestep_data['thalamus_grad'])
+    grads = grads.squeeze()[:, latent_dim] # pick one unit grads
+    grads[0] = 0 # first value is padded with a nan
+    centered_grads = grads - np.mean(grads)
+
+    # get the obs from the memory buffer
+    obs = testing_memory_buffer.timestep_data['obs']
+    obs = np.array(obs)
+
+    env_key = testing_memory_buffer.timestep_data['context_names']
+    means = []
+    for env_key in testing_memory_buffer.timestep_data['context_names']:
+        mean = testing_env.envs[env_key]['kwargs']['mean']
+        means.append(mean)
+    means = np.array(means)
+
+    max_trials = config.training_phases[0]['config']['max_trials_per_block']
+
+    context2 = np.zeros(len(obs))
+    # context2 is 1 for indices from 0 to 3*max_trials trials and the -1 from 3*max_trials trials to 6*max_trials trials and so on
+    for i in range(len(context2)):
+        if i//(3*max_trials) % 2 == 0:
+            context2[i] = 1
+        else:
+            context2[i] = -1
+    # the very first block is a special case, choosen always to be 20 and does not belong to any of the two sequences
+    # append 20 -1s to the beginning of the context2 and then remove the last 20 elements
+    context2 = np.concatenate([np.ones(20)*-1, context2])
+    context2 = context2[:-20]
+
+    # Now that I have the grads in a vector, I want to check their modulation by context2 array vs means array, using something similar to the analysis below:
+
+    centered_grads = grads - np.mean(grads)
+    centered_means = means-np.mean(means)
+    grads_modulation_by_context2 = np.dot(context2-np.mean(context2), centered_grads)/ len(context2) # 
+    grads_modulation_by_context2 = np.abs(grads_modulation_by_context2)
+
+    grads_modulation_by_means = np.dot(centered_means, centered_grads)/ len(means) #
+    grads_modulation_by_means = np.abs(grads_modulation_by_means)
+
+    grads_corr_by_context2 = np.abs(np.corrcoef(grads, context2)[0][1])
+    grads_corr_by_means = np.abs(np.corrcoef(grads, means)[0][1])
+
+    fig, axes = plt.subplot_mosaic([['A','B','B','B','B'], ['C', 'D', 'D', 'D', 'D']],
+                            constrained_layout=False, figsize = [12/2.53, 7/2.53])
+    import matplotlib.transforms as mtransforms
+    for label, ax in axes.items():
+        # label physical distance to the left and up: (left, up) raise up to move label up
+        trans = mtransforms.ScaledTranslation(-23/72, 2/72, fig.dpi_scale_trans)
+        ax.text(0.0, 1.0, label, transform=ax.transAxes + trans,
+                fontsize='large', va='bottom', fontfamily='arial',weight='bold')
+
+    # share x-axis between axes A and B
+    ax = axes['A']
+    ax2 = axes['C']
+    ax.get_shared_y_axes().join(ax, ax2)
+
+    # bar plot the modulation
+    # fig, axes = plt.subplots(3,1, figsize=(8,6))
+    ax = axes['A']
+    ax.bar([-1,0,1], [0,grads_corr_by_means,0], color='tab:blue', width=0.95)
+    ax.set_xticks([0])
+    ax.set_xticklabels([ 'Means'])
+    ax.set_ylabel('Correlation')
+    ax.set_xlabel('Variable')
+
+    ax = axes['C']
+    ax.bar([-1,0,1], [0,grads_corr_by_context2,0], color='tab:green', width=0.9)
+    ax.set_xticks([0])
+    ax.set_xticklabels(['Context2'])
+    ax.set_ylabel('Correlation')
+    ax.set_xlabel('Variable')
+
+    # plot centered grads overlaid on centered means
+    # ax.plot(centered_grads, label='grads')
+    ax = axes['B']
+    ax.plot(centered_means, label='means', color='tab:blue')
+    ax.axhline(0, color='k', linestyle='--', linewidth=0.5)
+    # ax.set_ylabel('Context1')
+    ax.set_xlabel('Trials')
+    # centered_grads have a very different scale, plot them on a second axis
+    ax2 = ax.twinx()
+    ax2.plot(centered_grads, label='grads', color='orange')
+    ax2.set_ylabel('Grads')
+    ax2.spines['right'].set_color('orange')
+    ax.legend()
+
+    # plot centered grads overlaid on centered context2
+    ax = axes['D']
+    ax.plot(context2-np.mean(context2), label='context2', color='tab:green')
+    ax.axhline(0, color='k', linestyle='--', linewidth=0.5)
+    # ax.set_ylabel('Context2')
+    ax.set_xlabel('Trials')
+    # centered_grads have a very different scale, plot them on a second axis
+    ax2 = ax.twinx()
+    ax2.plot(centered_grads, label='grads', color='orange')
+    ax2.set_ylabel('Grads')
+    ax2.spines['right'].set_color('orange')
+    ax2.legend()
+    ax.legend()
+    fig.tight_layout()
+
+def plot_dual_modulations(testing_memory_buffer, testing_env, testing_losses, config, x1=50, x2=np.inf):
+    # now get the gradients from the memory buffer
+    grads = np.stack(testing_memory_buffer.timestep_data['thalamus_grad'])
+    grads = grads.squeeze()
+    grads[0,:] = 0 # first value is padded with a nan
+
+    # get the obs from the memory buffer
+    obs = testing_memory_buffer.timestep_data['obs']
+    obs = np.array(obs)
+
+    env_key = testing_memory_buffer.timestep_data['context_names']
+    means = []
+    for env_key in testing_memory_buffer.timestep_data['context_names']:
+        mean = testing_env.envs[env_key]['kwargs']['mean']
+        means.append(mean)
+    means = np.array(means)
+
+    max_trials = config.training_phases[0]['config']['max_trials_per_block']
+
+    context2 = np.zeros(len(obs))
+    # context2 is 1 for indices from 0 to 3*max_trials trials and the -1 from 3*max_trials trials to 6*max_trials trials and so on
+    for i in range(len(context2)):
+        if i//(3*max_trials) % 2 == 0:
+            context2[i] = 1
+        else:
+            context2[i] = -1
+    # the very first block is a special case, choosen always to be 20 and does not belong to any of the two sequences
+    # append 20 -1s to the beginning of the context2 and then remove the last 20 elements
+    context2 = np.concatenate([np.ones(20)*-1, context2])
+    context2 = context2[:-20]
+
+    centered_grads = (grads - np.mean(grads, axis=0)) * 1/np.std(grads, axis=0)
+    centered_means = means-np.mean(means, axis=0)
+
+    grads_corr_by_context2 = np.abs(np.corrcoef(centered_grads[:, 0], context2)[0][1])
+    grads_corr_by_means = np.abs(np.corrcoef(centered_grads[:, 0], centered_means)[0][1])
+    grads_corr_by_context2_2 = np.abs(np.corrcoef(centered_grads[:, 1], context2)[0][1])
+    grads_corr_by_means_2 = np.abs(np.corrcoef(centered_grads[:, 1], centered_means)[0][1])
+
+    fig, axes = plt.subplot_mosaic([['A','B','B','B','B'], ['C', 'D', 'D', 'D', 'D']],
+                            constrained_layout=False, figsize = [12/2.53, 7/2.53])
+    import matplotlib.transforms as mtransforms
+    for label, ax in axes.items():
+        # label physical distance to the left and up: (left, up) raise up to move label up
+        trans = mtransforms.ScaledTranslation(-23/72, 2/72, fig.dpi_scale_trans)
+        ax.text(0.0, 1.0, label, transform=ax.transAxes + trans,
+                fontsize='large', va='bottom', fontfamily='arial',weight='bold')
+
+    # share x-axis between axes A and B
+    ax = axes['A']
+    ax2 = axes['C']
+    ax.get_shared_y_axes().join(ax, ax2)
+
+    # bar plot the modulation
+    # fig, axes = plt.subplots(3,1, figsize=(8,6))
+    ax = axes['A']
+    ax.bar([-1,0,1], [grads_corr_by_means,0,grads_corr_by_means_2], color='tab:blue', width=0.95)
+    ax.set_xticks([-1,1])
+    ax.set_xticklabels([ 'z1', 'z2'])
+    ax.set_ylabel('Correlation')
+    ax.set_xlabel('Means')
+
+    ax = axes['C']
+    ax.bar([-1,0,1], [grads_corr_by_context2,0,grads_corr_by_context2_2], color='tab:green', width=0.9)
+    ax.set_xticks([-1,1])
+    ax.set_xticklabels(['Z1', 'Z2'])
+    ax.set_ylabel('Correlation')
+    ax.set_xlabel('Context2')
+
+    # plot centered grads overlaid on centered means
+    # ax.plot(centered_grads, label='grads')
+    ax = axes['B']
+    ax.plot(centered_means, label='means', linewidth=1, color='tab:blue')
+    # ax.plot(centered_means, label='means', color='tab:orange', alpha=0.5)
+    ax.axhline(0, color='k', linestyle='--', linewidth=0.5)
+    # ax.set_ylabel('Context1')
+    ax.set_xlabel('Trials')
+    # centered_grads have a very different scale, plot them on a second axis
+    ax2 = ax.twinx()
+    ax2.plot(centered_grads[:, 0], '-', label='Z1 grads', color='tab:orange', alpha=0.8, linewidth=1)
+    ax2.plot(centered_grads[:, 1], label='Z2 grads', color='tab:red', linewidth=1)
+    ax2.set_ylabel('Grads')
+    ax2.spines['right'].set_color('tab:blue')
+    ax.legend()
+
+    # plot centered grads overlaid on centered context2
+    ax = axes['D']
+    ax.plot(context2-np.mean(context2), label='context2', color='tab:green')
+    ax.axhline(0, color='k', linestyle='--', linewidth=0.5)
+    # ax.set_ylabel('Context2')
+    ax.set_xlabel('Trials')
+    # centered_grads have a very different scale, plot them on a second axis
+    ax2 = ax.twinx()
+    # ax2.plot(centered_grads[:, 0], label='grads', color='tab:blue')
+    # ax2.plot(centered_grads[:, 1], label='grads', color='tab:orange', alpha=0.5)
+    ax2.plot(centered_grads[:, 0], '-', label='Z1 grads', color='tab:orange', alpha=0.8, linewidth=1)
+    ax2.plot(centered_grads[:, 1], label='Z2 grads', color='tab:red', linewidth=1)
+    ax2.set_ylabel('Grads')
+    ax2.spines['right'].set_color('tab:blue')
+    ax2.legend()
+    ax.legend()
+    fig.tight_layout()
+
+# plot_modulations(testing_memory_buffer, testing_env, testing_losses, config, x1=50, x2=np.inf)
+def get_correlations(testing_memory_buffer, testing_env, config, use_grads=True):
+    # get the thalamus activity from the memory buffer
+    thalamus = np.stack(testing_memory_buffer.timestep_data['thalamus'])
+    thalamus = thalamus.squeeze()[:, 0] # take only one unit 
+
+    grads = np.stack(testing_memory_buffer.timestep_data['thalamus_grad'])
+    grads = grads.squeeze()[:, 0] # take only one unit grads
+    grads[0] = 0
+
+    # get the obs from the memory buffer
+    obs = testing_memory_buffer.timestep_data['obs']
+    obs = np.array(obs)
+
+    env_key = testing_memory_buffer.timestep_data['context_names']
+    means = []
+    for env_key in testing_memory_buffer.timestep_data['context_names']:
+        mean = testing_env.envs[env_key]['kwargs']['mean']
+        means.append(mean)
+    means = np.array(means)
+
+    max_trials = config.training_phases[0]['config']['max_trials_per_block']
+
+    context2 = np.zeros(len(obs))
+    # context2 is 1 for indices from 0 to 3*max_trials trials and the -1 from 3*max_trials trials to 6*max_trials trials and so on
+    for i in range(len(context2)):
+        if i//(3*max_trials) % 2 == 0:
+            context2[i] = 1
+        else:
+            context2[i] = -1
+    # the very first block is a special case, choosen always to be 20 and does not belong to any of the two sequences
+    # append 20 -1s to the beginning of the context2 and then remove the last 20 elements
+    context2 = np.concatenate([np.ones(20)*-1, context2])
+    context2 = context2[:-20]
+
+    if not use_grads:
+        # calculate the correlation between thalamus and context2
+        corr_thalamus_context2 = np.abs(np.corrcoef(thalamus, context2)[0][1])
+
+        # calculate the correlation between thalamus and means
+        corr_thalamus_means = np.abs(np.corrcoef(thalamus, means)[0][1])
+    else: # use grads
+        # calculate the correlation between grads and context2
+        corr_thalamus_context2 = np.abs(np.corrcoef(grads, context2)[0][1])
+
+        # calculate the correlation between grads and means
+        corr_thalamus_means = np.abs(np.corrcoef(grads, means)[0][1])
+        
+    return corr_thalamus_context2, corr_thalamus_means
 
 def extract_gen_performance(logger, env, ts_before=20, ts_after=0):
     obs = np.stack(logger.timestep_data['obs']).squeeze()

@@ -227,7 +227,19 @@ def adapt_model_v3(model, env,  _use_oracle, config, optimizer_to_use, horizon, 
             thalamus_grads = torch.from_numpy(bayesian_likelihoods).float().to(model.device)
             model.thalamus.grad = thalamus_grads
         if config.accummulate_thalamus_temporally:
-            model.thalamus.grad[-1] += torch.sum(model.thalamus.grad, dim=0)
+            if config.no_of_latents == 1:
+                model.thalamus.grad[-1] += torch.sum(model.thalamus.grad, dim=0)
+            elif config.no_of_latents > 1:
+                latent_size = int(config.thalamus_size / config.no_of_latents)
+                # reshape x to be [seq, batch, latent_size, no_of_latents]
+                # then sum the gradients along the seq dimension according to the horizon len of each latent
+                # then reshape back to [seq, batch, thalamus_size]
+                _grads = model.thalamus.grad.reshape(model.thalamus.grad.shape[0], model.thalamus.grad.shape[1], latent_size, config.no_of_latents)
+                for i in range(config.no_of_latents):
+                    l_horizon = config.latent_accummulation_horizons[i]
+                    _grads[-1:, :, :, i] += torch.sum(_grads[-l_horizon:, :, :, i], dim=0)
+                model.thalamus.grad = _grads.reshape(_grads.shape[0], _grads.shape[1], config.thalamus_size)
+
         optimizer.step()
         if len(horizon_obs) == horizon:
             uwhydoIhavetohavealine= False

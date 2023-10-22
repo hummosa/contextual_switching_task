@@ -40,8 +40,18 @@ class LSTM_model(nn.Module):
         LU_optimizer = torch.optim.SGD([self.thalamus], lr=self.config.LU_lr, momentum=self.config.momentum)
         return LU_optimizer
     def thalamus_activation_function_softmax(self, x):
-        # return x 
-        return torch.softmax(x, dim = -1) # note: 0, 1 becomes 0.2689, 0.7311
+        if self.config.no_of_latents == 1:
+            sm = torch.softmax(x, dim = -1, temperature= self.config.activation_fxn_temp) # note: 0, 1 becomes 0.2689, 0.7311
+        elif self.config.no_of_latents > 1:
+            latent_size = int(self.config.thalamus_size / self.config.no_of_latents)
+            # resize x to be [seq, batch, latent_size, no_of_latents]
+            # then softmax along the latent_size dimension
+            # then reshape back to [seq, batch, thalamus_size]
+            x = x.reshape(x.shape[0], x.shape[1], latent_size, self.config.no_of_latents)
+            sm = torch.softmax(x, dim = 2)
+            sm = sm.reshape(x.shape[0], x.shape[1], self.config.thalamus_size)
+
+        return sm
     def thalamus_activation_function_none(self, x):
         return x 
     def init_hidden(self):
