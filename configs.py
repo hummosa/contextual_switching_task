@@ -70,7 +70,7 @@ class Config():
         self.latent_shape = 10
         self.activation_fxn = 'relu'
         self.seed = 2
-
+        self.seed_env = 2 # a separate seed for the environment class was needed for certain experiments 8.
         #Hyperparameters
         self.gamma         = 0.98
         self.lmbda         = 0.95

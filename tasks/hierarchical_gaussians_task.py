@@ -128,7 +128,7 @@ class Generative_environment(gym.Env):
                                                 shape=(self.output_size,),
                                                 dtype=np.float32)
         self.config = config
-        self.rng = np.random.RandomState(config.seed)
+        self.rng = np.random.RandomState(config.seed_env)
         ## Two absractions available, block is a no_of_trials_per_block trials, and trials are no_of_timesteps_per_trial timesteps
         self.no_of_timesteps_per_trial = 1 # 1 results in ignoring concept of trial
         
@@ -298,14 +298,8 @@ class Generative_environment(gym.Env):
                     con_id = (self.block_i//2)+1
                     con_id = con_id % len(context_options) # loop through all contexts at the end
                     self.current_context = context_options[con_id] # use the next context in the list
-                    # print('self.current_context: ', self.current_context)
-                    # print('con_id: ', con_id)
-                    # print('context_options: ', context_options)
 
                 self.trial_in_block = 0
-                # uses self.trials_remaining_in_block =20 above as fixed block width. 
-                # self.trials_remaining_in_block = np.clip(self.rng.geometric(p=self.config.context_switch_rate, ),
-                #     self.config.min_trials_per_block, self.config.max_trials_per_block)
                 self.trials_remaining_in_block = self.config.min_trials_per_block
                 self.block_i += 1
                 self.env_logger['switches_ts'].append(self.ts_i)
