@@ -49,7 +49,7 @@ def adapt_model_v2(model, env,  _use_oracle, config, optimizer, horizon, criteri
             model.hidden= hidden.detach()
             
         if input_distort:
-            horizon_obs = horizon_obs + torch.randn_like(horizon_obs)*0.8
+            horizon_obs = horizon_obs + torch.randn_like(horizon_obs)*0.4
         output, hidden = model(input=horizon_obs, reward = None, thalamic_inputs=thalamic_inputs,)
         obs, reward, done, info = env.step(output[-1:].detach().cpu().numpy())
         obs = torch.tensor(obs).float().to(model.device)
@@ -207,7 +207,8 @@ def adapt_model_v3(model, env,  _use_oracle, config, optimizer_to_use, horizon, 
             thalamus_timestep_no = min(horizon, horizon_obs.shape[0]+1) 
             # +1 because another obs will be added from the env to horizon next but # if horizon is full, then +1 becomes in appropriate, an obs will be added and another will be taken out
             thalamic_inputs = torch.ones(thalamus_timestep_no,horizon_obs.shape[1], config.thalamus_size).float().to(model.device)/config.thalamus_size 
-        
+
+
         # optimize latent context (thalamus) or weights:
         optimizer = model.LU_optimizer if optimizer_to_use == 'LU' else model.WU_optimizer
         optimizer.zero_grad()
@@ -234,14 +235,19 @@ def adapt_model_v3(model, env,  _use_oracle, config, optimizer_to_use, horizon, 
                 # reshape x to be [seq, batch, latent_size, no_of_latents]
                 # then sum the gradients along the seq dimension according to the horizon len of each latent
                 # then reshape back to [seq, batch, thalamus_size]
-                _grads = model.thalamus.grad.reshape(model.thalamus.grad.shape[0], model.thalamus.grad.shape[1], latent_size, config.no_of_latents)
+                _grads = model.thalamus.grad.reshape(model.thalamus.grad.shape[0], model.thalamus.grad.shape[1],  config.no_of_latents, latent_size,)
                 for i in range(config.no_of_latents):
                     l_horizon = config.latent_accummulation_horizons[i]
-                    _grads[-1:, :, :, i] += torch.sum(_grads[-l_horizon:, :, :, i], dim=0)
+                    _grads[-1:, :, i, :] += torch.sum(_grads[-l_horizon:, :, i, :], dim=0)
                 model.thalamus.grad = _grads.reshape(_grads.shape[0], _grads.shape[1], config.thalamus_size)
 
         optimizer.step()
-        if len(horizon_obs) == horizon:
+        if ((len(logger.timestep_data['obs'])+1) % horizon) ==0:
+            # import matplotlib.pyplot as plt
+            # obs and all of prespecified thalamus:
+            # fig, axes = plt.subplots(1,1, figsize=[8,2]); axes.plot(horizon_obs.squeeze()); axes.plot(prespecified_thalamus.squeeze(), linewidth=0.5) ;plt.savefig('./output.jpg')    
+            # thalamic input and obs:
+            # fig, axes = plt.subplots(1,1, figsize=[8,2]); axes.plot(horizon_obs.squeeze()); axes.plot(thalamic_inputs.squeeze(), linewidth=0.5) ;plt.savefig('./output.jpg')
             uwhydoIhavetohavealine= False
 
         # update info with the gradient of the model thalamus. Since model.thlalamus is len seq, take only last timestep

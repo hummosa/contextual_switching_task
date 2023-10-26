@@ -36,13 +36,13 @@ class Config():
         self.no_of_contexts = context_units #len(self.env_names)
         self.no_of_latents = 1
         assert((self.no_of_contexts % self.no_of_latents) == 0) # to ensure that the number of contexts is divisible by the number of latents
-        self.latent_accummulation_horizons = [2, 100] # will max at experiment horizon in train.py
         self.thalamus_size = self.no_of_contexts
         self.use_thalamus = False # to use thalamus withouth the oracle
         self.reward_fn = lambda y,x: x-y
         self.thalamus_activation_function = 'softmax' # 'softmax' or 'none'
-        self.activation_fxn_temp = 0.1
+        self.activation_fxn_temp = .1
         self.accummulate_thalamus_temporally = False
+        self.latent_accummulation_horizons = [2, 100] # will max at experiment horizon in train.py
         
         self.batch_size = 1 # to simulate human cognition experience, but can later increase for efficiency
         self.seq_size = 1 #
@@ -61,7 +61,7 @@ class Config():
         # Model parameters
         # self.lr  = 0.0005
         self.LU_lr = 0.3
-        self.WU_lr = 0.001
+        self.WU_lr = 0.0005
         self.momentum = 0.5
         self.rnn_type = 'LSTM' # 'LSTM' or 'RNN'
         # self.lr_pi           = 0.0005

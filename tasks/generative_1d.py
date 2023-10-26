@@ -199,7 +199,6 @@ class Generative_environment(gym.Env):
                 kwargs = task_d['kwargs'] 
                 task_d.update({'env_instant': task_d['env_constructor'](self.config, **kwargs) })
             self.envs= self.interesting_envs
-        elif experiment == 7: # multiscale gaussian experiment. Hierarchical temporal abstraction.
 
         # self.novel_envs = dict({'env_name': 'env_class_constroctor'}) # samples from novel tasks not see in training
         self.no_of_tasks = len(self.envs) #  TODO need to add test and novel envs later
