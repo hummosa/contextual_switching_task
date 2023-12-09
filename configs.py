@@ -20,6 +20,7 @@ class Config():
         self.additional_inputs = False
         self.ablate_context_signal = False
         self.l2_loss = False
+        self.LU_optimizer = 'SGD' # 'SGD' or 'Adam'
         self.gradient_clipping = 0
         self.backprop_only_last_timestep = False
         self.default_mean1 = 0.2
@@ -32,7 +33,6 @@ class Config():
         # Environments
         self.env_names = [k for k in env_kwargs.keys()]
         self.env_kwargs = env_kwargs
-        self.env_libarrary = {} # TODO create a list of env names classes, ids, and args.
         self.no_of_contexts = context_units #len(self.env_names)
         self.no_of_latents = 1
         assert((self.no_of_contexts % self.no_of_latents) == 0) # to ensure that the number of contexts is divisible by the number of latents
@@ -70,7 +70,6 @@ class Config():
         # self.latent_lr = 1e-1
         self.latent_decay = 0.9
         self.hidden_size = 64
-        self.no_of_hypothesis = 5
         self.latent_shape = 10
         self.activation_fxn = 'relu'
         self.seed = 2

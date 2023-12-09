@@ -37,7 +37,10 @@ class LSTM_model(nn.Module):
         elif self.config.thalamus_activation_function == 'none':
             self.thalamus_activation_function = self.thalamus_activation_function_none
     def get_LU_optimizer(self):
-        LU_optimizer = torch.optim.SGD([self.thalamus], lr=self.config.LU_lr, momentum=self.config.momentum)
+        if self.config.LU_optimizer == 'Adam':
+            LU_optimizer = torch.optim.Adam([self.thalamus], lr=self.config.LU_lr, weight_decay= self.config.l2_loss if self.config.l2_loss else 0)
+        elif self.config.LU_optimizer == 'SGD':
+            LU_optimizer = torch.optim.SGD([self.thalamus], lr=self.config.LU_lr, momentum=self.config.momentum)
         return LU_optimizer
     def thalamus_activation_function_softmax(self, x):
         if self.config.no_of_latents == 1:
