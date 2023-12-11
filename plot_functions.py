@@ -9,7 +9,112 @@ obs_color = 'tab:grey'
 preds_color = 'tab:red'
 
 figure_dpi = 600
-def plot_modulations(testing_memory_buffer, testing_env, testing_losses, config, x1=50, x2=np.inf, latent_dim = 0 ):
+
+def plot_task_and_hierarchies_illustration(testing_memory_buffer, testing_env, testing_losses, config, x1=50, x2=np.inf, latent_dim = 0 ):
+    # get the obs from the memory buffer
+    logger = testing_memory_buffer
+    env = testing_env
+    obs_color = 'tab:grey'
+    obs = testing_memory_buffer.timestep_data['obs']
+    obs = np.array(obs)
+
+    env_key = testing_memory_buffer.timestep_data['context_names']
+    means = []
+    for env_key in testing_memory_buffer.timestep_data['context_names']:
+        mean = testing_env.envs[env_key]['kwargs']['mean']
+        means.append(mean)
+    means = np.array(means)
+
+    max_trials = config.training_phases[0]['config']['max_trials_per_block']
+    context2 = get_context2_vector(testing_memory_buffer, config)
+
+    fig, axes = plt.subplot_mosaic([['A'], ['B'], ['B']], sharex=True,
+                                    constrained_layout=False, figsize = [16/2.53, 5/2.53], dpi=300)
+
+    for label, ax in axes.items():
+        # label physical distance to the left and up: (left, up) raise up to move label up
+        trans = mtransforms.ScaledTranslation(-23/72, 2/72, fig.dpi_scale_trans)
+        ax.text(0.0, 1.0, label, transform=ax.transAxes + trans,
+            fontsize='large', va='bottom', fontfamily='arial',weight='bold')
+
+    ax = axes['B'] 
+    obs = np.stack(logger.timestep_data['obs']).squeeze()
+    preds = np.stack(logger.timestep_data['predictions']).squeeze()
+    ax.plot(obs, 'o', label='obs', markersize=0.5, color=obs_color)
+    # ax.plot(preds, 'o', label='preds', markersize=0.5, color=preds_color)
+    switches_ts_padded = env.env_logger['switches_ts'] +[logger.timestep_data['timestep_i'][-1]]
+    # ax.legend(loc='upper right', fontsize=6, ncol=2)
+    ax.legend(fontsize=6,)# loc='upper left')#loc=(.3,1.2))
+    axes_labels(ax,'Time steps','Observations')
+    # ax.set_ylim([-0.1, 1.1])
+    # ax.set_xticklabels([])
+
+
+    for i, switch in enumerate(switches_ts_padded[:-1]):
+        if i%2 == 0 and  switches_ts_padded[i+1] < x2:
+            ax.axvspan(switches_ts_padded[i], switches_ts_padded[i+1], alpha=0.1, color='grey')
+
+    ax = axes['A']
+    for c in range(20, len(obs)):
+        if (c-20) % (3*max_trials) ==0: # if context changes
+            color = 'b' if c//(3*max_trials) % 2 == 0 else 'g'
+            ax.axvline(c, .6, .9 , color=color, linestyle='-', alpha=0.6, linewidth=3)
+
+    # Define the colormap
+    cmap = plt.get_cmap('magma')
+
+    # Normalize the means vector to range between 0 and 1
+    norm = plt.Normalize(vmin=0, vmax=1)
+
+    # Convert the means vector to a color vector using the colormap
+    color_vector = cmap((means))
+
+    for b in range(20,len(means)):
+        if (b-20) % (max_trials) ==0: # if context changes
+            color = color_vector[b]
+            ax.axvline(b, 0.0,0.4,  alpha=0.6, color=color, linewidth=3)
+    # ax.axhline(1, color=color_vector, linestyle='-', linewidth=3, alpha=0.5)
+    ax.set_axis_off()
+
+
+def get_context2_vector(logger, config):
+    obs = np.stack(logger.timestep_data['obs'])
+    max_trials = config.training_phases[0]['config']['max_trials_per_block']
+
+    context2 = np.zeros(len(obs))
+    # context2 is 1 for indices from 0 to 3*max_trials trials and the -1 from 3*max_trials trials to 6*max_trials trials and so on
+    for i in range(len(context2)):
+        if i//(3*max_trials) % 2 == 0:
+            context2[i] = 1
+        else:
+            context2[i] = -1
+    # the very first block is a special case, choosen always to be 20 and does not belong to any of the two sequences
+    # append 20 -1s to the beginning of the context2 and then remove the last 20 elements
+    context2 = np.concatenate([np.ones(20)*-1, context2])
+    context2 = context2[:-20]
+    # print('context2' , context2)
+    return context2
+
+def get_level_2_values(env, testing_memory_buffer):
+    switches_ts = env.env_logger['switches_ts']
+    level_2_event_type = env.env_logger['level_2_values']
+    # print(level_2_event_type)
+    current_level_2_vector = []
+    current_level_2 = 0
+
+    # get the hiest timestep in switches ts
+    max_ts = testing_memory_buffer.timestep_data['trial_i'][-1]
+
+    for ts in range(max_ts+1):
+        if ts in switches_ts:
+                    current_level_2 = level_2_event_type[switches_ts.index(ts)]
+        current_level_2_vector.append(current_level_2)
+
+    current_level_2_vector = np.array(current_level_2_vector)
+    return current_level_2_vector
+
+
+def plot_modulations(testing_memory_buffer, testing_env, testing_losses, config, x1=50, x2=np.inf, latent_dim = 0, replace_context2_with_level2 = False):
     # now get the gradients from the memory buffer
     grads = np.stack(testing_memory_buffer.timestep_data['thalamus_grad'])
     grads = grads.squeeze()[:, latent_dim] # pick one unit grads
@@ -29,17 +134,20 @@ def plot_modulations(testing_memory_buffer, testing_env, testing_losses, config,
 
     max_trials = config.training_phases[0]['config']['max_trials_per_block']
 
-    context2 = np.zeros(len(obs))
-    # context2 is 1 for indices from 0 to 3*max_trials trials and the -1 from 3*max_trials trials to 6*max_trials trials and so on
-    for i in range(len(context2)):
-        if i//(3*max_trials) % 2 == 0:
-            context2[i] = 1
-        else:
-            context2[i] = -1
-    # the very first block is a special case, choosen always to be 20 and does not belong to any of the two sequences
-    # append 20 -1s to the beginning of the context2 and then remove the last 20 elements
-    context2 = np.concatenate([np.ones(20)*-1, context2])
-    context2 = context2[:-20]
+    if not replace_context2_with_level2:
+        context2 = np.zeros(len(obs))
+        # context2 is 1 for indices from 0 to 3*max_trials trials and the -1 from 3*max_trials trials to 6*max_trials trials and so on
+        for i in range(len(context2)):
+            if i//(3*max_trials) % 2 == 0:
+                context2[i] = 1
+            else:
+                context2[i] = -1
+        # the very first block is a special case, choosen always to be 20 and does not belong to any of the two sequences
+        # append 20 -1s to the beginning of the context2 and then remove the last 20 elements
+        context2 = np.concatenate([np.ones(20)*-1, context2])
+        context2 = context2[:-20]
+    else:
+        context2 = get_level_2_values(testing_env, testing_memory_buffer)
 
     # Now that I have the grads in a vector, I want to check their modulation by context2 array vs means array, using something similar to the analysis below:
 
@@ -93,7 +201,7 @@ def plot_modulations(testing_memory_buffer, testing_env, testing_losses, config,
     ax.set_xlabel('Trials')
     # centered_grads have a very different scale, plot them on a second axis
     ax2 = ax.twinx()
-    ax2.plot(centered_grads, label='grads', color='orange')
+    ax2.plot(centered_grads, label='grads', color='tab:orange', linewidth=1, alpha=0.7)
     ax2.set_ylabel('Grads')
     ax2.spines['right'].set_color('orange')
     ax.legend()
@@ -106,18 +214,18 @@ def plot_modulations(testing_memory_buffer, testing_env, testing_losses, config,
     ax.set_xlabel('Trials')
     # centered_grads have a very different scale, plot them on a second axis
     ax2 = ax.twinx()
-    ax2.plot(centered_grads, label='grads', color='orange')
+    ax2.plot(centered_grads, label='grads', color='tab:orange', linewidth=1, alpha=0.7)
     ax2.set_ylabel('Grads')
     ax2.spines['right'].set_color('orange')
     ax2.legend()
     ax.legend()
     fig.tight_layout()
 
-def plot_dual_modulations(testing_memory_buffer, testing_env, testing_losses, config, x1=50, x2=np.inf):
+def plot_dual_modulations(testing_memory_buffer, testing_env, testing_losses, config, x1=50, x2=np.inf, replace_context2_with_level2 = False):
     # now get the gradients from the memory buffer
     grads = np.stack(testing_memory_buffer.timestep_data['thalamus_grad'])
     grads = grads.squeeze()
-    grads[0,:] = 0 # first value is padded with a nan
+    grads[0,:] = grads[1,:] # first value is padded with a nan
 
     # get the obs from the memory buffer
     obs = testing_memory_buffer.timestep_data['obs']
@@ -130,27 +238,28 @@ def plot_dual_modulations(testing_memory_buffer, testing_env, testing_losses, co
         means.append(mean)
     means = np.array(means)
 
-    max_trials = config.training_phases[0]['config']['max_trials_per_block']
-
-    context2 = np.zeros(len(obs))
-    # context2 is 1 for indices from 0 to 3*max_trials trials and the -1 from 3*max_trials trials to 6*max_trials trials and so on
-    for i in range(len(context2)):
-        if i//(3*max_trials) % 2 == 0:
-            context2[i] = 1
-        else:
-            context2[i] = -1
-    # the very first block is a special case, choosen always to be 20 and does not belong to any of the two sequences
-    # append 20 -1s to the beginning of the context2 and then remove the last 20 elements
-    context2 = np.concatenate([np.ones(20)*-1, context2])
-    context2 = context2[:-20]
-
+    if not replace_context2_with_level2:
+        context2 = np.zeros(len(obs))
+        # context2 is 1 for indices from 0 to 3*max_trials trials and the -1 from 3*max_trials trials to 6*max_trials trials and so on
+        for i in range(len(context2)):
+            if i//(3*max_trials) % 2 == 0:
+                context2[i] = 1
+            else:
+                context2[i] = -1
+        # the very first block is a special case, choosen always to be 20 and does not belong to any of the two sequences
+        # append 20 -1s to the beginning of the context2 and then remove the last 20 elements
+        context2 = np.concatenate([np.ones(20)*-1, context2])
+        context2 = context2[:-20]
+    else:
+        context2 = get_level_2_values(testing_env, testing_memory_buffer)
+        
     centered_grads = (grads - np.mean(grads, axis=0)) * 1/np.std(grads, axis=0)
     centered_means = means-np.mean(means, axis=0)
 
     grads_corr_by_context2 = np.abs(np.corrcoef(centered_grads[:, 0], context2)[0][1])
     grads_corr_by_means = np.abs(np.corrcoef(centered_grads[:, 0], centered_means)[0][1])
-    grads_corr_by_context2_2 = np.abs(np.corrcoef(centered_grads[:, 1], context2)[0][1])
-    grads_corr_by_means_2 = np.abs(np.corrcoef(centered_grads[:, 1], centered_means)[0][1])
+    grads_corr_by_context2_2 = np.abs(np.corrcoef(centered_grads[:, 2], context2)[0][1])
+    grads_corr_by_means_2 = np.abs(np.corrcoef(centered_grads[:, 2], centered_means)[0][1])
 
     fig, axes = plt.subplot_mosaic([['A','B','B','B','B'], ['C', 'D', 'D', 'D', 'D']],
                             constrained_layout=False, figsize = [12/2.53, 7/2.53])
@@ -193,7 +302,7 @@ def plot_dual_modulations(testing_memory_buffer, testing_env, testing_losses, co
     # centered_grads have a very different scale, plot them on a second axis
     ax2 = ax.twinx()
     ax2.plot(centered_grads[:, 0], '-', label='Z1 grads', color='tab:orange', alpha=0.8, linewidth=1)
-    ax2.plot(centered_grads[:, 1], label='Z2 grads', color='tab:red', linewidth=1)
+    ax2.plot(centered_grads[:, 2], label='Z2 grads', color='tab:red', linewidth=1)
     ax2.set_ylabel('Grads')
     ax2.spines['right'].set_color('tab:blue')
     ax.legend()
@@ -209,7 +318,7 @@ def plot_dual_modulations(testing_memory_buffer, testing_env, testing_losses, co
     # ax2.plot(centered_grads[:, 0], label='grads', color='tab:blue')
     # ax2.plot(centered_grads[:, 1], label='grads', color='tab:orange', alpha=0.5)
     ax2.plot(centered_grads[:, 0], '-', label='Z1 grads', color='tab:orange', alpha=0.8, linewidth=1)
-    ax2.plot(centered_grads[:, 1], label='Z2 grads', color='tab:red', linewidth=1)
+    ax2.plot(centered_grads[:, 2], label='Z2 grads', color='tab:red', linewidth=1)
     ax2.set_ylabel('Grads')
     ax2.spines['right'].set_color('tab:blue')
     ax2.legend()
@@ -217,13 +326,13 @@ def plot_dual_modulations(testing_memory_buffer, testing_env, testing_losses, co
     fig.tight_layout()
 
 # plot_modulations(testing_memory_buffer, testing_env, testing_losses, config, x1=50, x2=np.inf)
-def get_correlations(testing_memory_buffer, testing_env, config, use_grads=True):
+def get_correlations(testing_memory_buffer, testing_env, config, use_grads=True, latent_dim=0):
     # get the thalamus activity from the memory buffer
     thalamus = np.stack(testing_memory_buffer.timestep_data['thalamus'])
-    thalamus = thalamus.squeeze()[:, 0] # take only one unit 
+    thalamus = thalamus.squeeze()[:, latent_dim] # take only one unit 
 
     grads = np.stack(testing_memory_buffer.timestep_data['thalamus_grad'])
-    grads = grads.squeeze()[:, 0] # take only one unit grads
+    grads = grads.squeeze()[:, latent_dim] # take only one unit grads
     grads[0] = 0
 
     # get the obs from the memory buffer
@@ -252,19 +361,13 @@ def get_correlations(testing_memory_buffer, testing_env, config, use_grads=True)
     context2 = context2[:-20]
 
     if not use_grads:
-        # calculate the correlation between thalamus and context2
-        corr_thalamus_context2 = np.abs(np.corrcoef(thalamus, context2)[0][1])
-
-        # calculate the correlation between thalamus and means
-        corr_thalamus_means = np.abs(np.corrcoef(thalamus, means)[0][1])
+        corr_context2 = np.abs(np.corrcoef(thalamus, context2)[0][1])
+        corr_means = np.abs(np.corrcoef(thalamus, means)[0][1])
     else: # use grads
-        # calculate the correlation between grads and context2
-        corr_thalamus_context2 = np.abs(np.corrcoef(grads, context2)[0][1])
-
-        # calculate the correlation between grads and means
-        corr_thalamus_means = np.abs(np.corrcoef(grads, means)[0][1])
+        corr_context2 = np.abs(np.corrcoef(grads, context2)[0][1])
+        corr_means = np.abs(np.corrcoef(grads, means)[0][1])
         
-    return corr_thalamus_context2, corr_thalamus_means
+    return corr_context2, corr_means
 
 def extract_gen_performance(logger, env, ts_before=20, ts_after=0):
     obs = np.stack(logger.timestep_data['obs']).squeeze()
@@ -687,7 +790,7 @@ def plot_behavior(logger, env, losses, config, _use_oracle = False):
     ax = axes['B']
     switches_ts = env.env_logger['switches_ts']
     switches_ts = np.array(switches_ts)
-    for i, switch in enumerate(switches_ts[-5:-4]): # 
+    for i, switch in enumerate(switches_ts[-6:-5]): # 
         if len (obs[switch-ts_before:switch+ts_after]) == ts_before+ts_after:
             ax.plot(range(-ts_before, ts_after), obs[switch-ts_before:switch+ts_after], '.', markersize=1)
             ax.plot(range(-ts_before, ts_after), preds[switch-ts_before:switch+ts_after], '.', markersize=1)
@@ -949,8 +1052,8 @@ def plot_bayesian_grads_comparison_zoomed_in(plog, env, memory_buffer ):
 
 
 def plot_grads(logger, env, x1=50, x2=np.inf):
-    fig, axes = plt.subplot_mosaic([['A'],['B'],['C', ], ['D'],], sharex=True,
-                                constrained_layout=False, figsize = [21/2.53, 10/2.53]) #[12/2.53, 7/2.53])
+    fig, axes = plt.subplot_mosaic([['A'],['B'],['C', ],], sharex=True,
+                                constrained_layout=False, figsize = [21/2.53, 8/2.53]) #[12/2.53, 7/2.53])
     import matplotlib.transforms as mtransforms
     for label, ax in axes.items():
         # label physical distance to the left and up: (left, up) raise up to move label up
@@ -961,8 +1064,8 @@ def plot_grads(logger, env, x1=50, x2=np.inf):
     ax = axes['A']
     obs = np.stack(logger.timestep_data['obs']).squeeze()
     preds = np.stack(logger.timestep_data['predictions']).squeeze()
-    ax.plot(obs, 'o', label='obs', markersize=0.5)
-    ax.plot(preds, 'o', label='preds', markersize=0.5)
+    ax.plot(obs, 'o', label='obs', markersize=0.5, color=obs_color)
+    ax.plot(preds, 'o', label='preds', markersize=0.5, color=preds_color)
     switches_ts_padded = env.env_logger['switches_ts'] +[logger.timestep_data['timestep_i'][-1]]
     # ax.legend(loc='upper right', fontsize=6, ncol=2)
     ts_before, ts_after = 20, 50
@@ -997,17 +1100,17 @@ def plot_grads(logger, env, x1=50, x2=np.inf):
     thalamus = np.stack(logger.timestep_data['thalamus'])
     ax.plot(thalamus.squeeze(), linewidth=0.5, )#label=['Thalamus 1', 'Thalamus 2'])
     # ax.legend(loc='upper right', fontsize=6, ncol=1)
-    axes_labels(ax, '', 'Z values', ypad=-1)
+    axes_labels(ax, 'Time step', 'Z values', ypad=-1)
 
-    ax = axes ['D']
-    thalamus_grads_nan_filtered = np.nan_to_num(thalamus_grads.squeeze())
-    # scaled_thalamus_grads = (thalamus_grads_nan_filtered-thalamus_grads_nan_filtered.min())/(thalamus_grads_nan_filtered.max()-thalamus_grads_nan_filtered.min())
-    grads = -thalamus_grads_nan_filtered # minus, because gradients are the slope wiht respect to loss, not accuracy. So signs are flipped.
-    grads =  grads + np.abs(grads.min())-0.2
-    grads = np.clip(grads, 0, np.inf)
-    ax.plot((thalamus.squeeze()* grads).sum(axis=1), linewidth=0.5, color= 'grey', label='Evidence')
-    axes_labels(ax, 'Time step', 'Evidence', ypad=-1)
-    ax.legend(loc='upper right', fontsize=6, ncol=2)
+    # ax = axes ['D']
+    # thalamus_grads_nan_filtered = np.nan_to_num(thalamus_grads.squeeze())
+    # # scaled_thalamus_grads = (thalamus_grads_nan_filtered-thalamus_grads_nan_filtered.min())/(thalamus_grads_nan_filtered.max()-thalamus_grads_nan_filtered.min())
+    # grads = -thalamus_grads_nan_filtered # minus, because gradients are the slope wiht respect to loss, not accuracy. So signs are flipped.
+    # grads =  grads + np.abs(grads.min())-0.2
+    # grads = np.clip(grads, 0, np.inf)
+    # ax.plot((thalamus.squeeze()* grads).sum(axis=1), linewidth=0.5, color= 'grey', label='Evidence')
+    # axes_labels(ax, 'Time step', 'Evidence', ypad=-1)
+    # ax.legend(loc='upper right', fontsize=6, ncol=2)
 
     for ax in axes:
         if x2 !=np.inf: axes[ax].set_xlim([x1, x2])
