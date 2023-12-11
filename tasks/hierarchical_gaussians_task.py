@@ -236,6 +236,26 @@ class Generative_environment(gym.Env):
             for env_name, task_d in self.envs.items():
                 kwargs = task_d['kwargs'] 
                 task_d.update({'env_instant': task_d['env_constructor'](self.config, **kwargs) })
+        elif experiment==10: # randomizing the order of the two sequences in experiment 9
+            self.envs = defaultdict(dict)
+            self.means = [0.2, 0.8, 0.5]
+            self.seq1_means = [0.2, 0.8, 0.5]
+            self.seq2_means = [0.5, 0.8, 0.2]
+            self.seq1_seeds = [1,1,1] # a sequence of rng seeds
+            self.seq2_seeds = [2,2,2] # a sequence of rng seeds
+            for i, mean in enumerate(self.seq1_means):
+                self.envs[f'gauss{i}'] = {'env_id':0, 'env_constructor': Generative_1d_gauss, 'kwargs': {'mean': mean, 'std': self.config.default_std}}
+            for i, mean in enumerate(self.seq2_means):
+                self.envs[f'gauss{i+len(self.seq1_means)}'] = {'env_id':0, 'env_constructor': Generative_1d_gauss, 'kwargs': {'mean': mean, 'std': self.config.default_std}}
+            for env_name, task_d in self.envs.items():
+                kwargs = task_d['kwargs'] 
+                task_d.update({'env_instant': task_d['env_constructor'](self.config, **kwargs) })
+
+            self.level2_i = 0
+            self.blocks_remaining_in_level_2 = 1
+            self.blocks_in_level_2 = 3
+            self.block_no_in_level_2 = 0
+            self.current_level_2 = 0
 
         # self.novel_envs = dict({'env_name': 'env_class_constroctor'}) # samples from novel tasks not see in training
         self.no_of_tasks = len(self.envs) #  TODO need to add test and novel envs later
@@ -251,7 +271,7 @@ class Generative_environment(gym.Env):
         self.ts_i = 0
         self.trial_in_block = 0
         self.ts_in_trial = 0
-        self.trials_remaining_in_block = 20 # TODO define better if this option gets used
+        self.trials_remaining_in_block = 1 
 
     def context_transition_update(self):
         '''
@@ -358,6 +378,35 @@ class Generative_environment(gym.Env):
                 self.trials_remaining_in_block = self.config.max_trials_per_block
                 self.block_i += 1
                 self.env_logger['switches_ts'].append(self.ts_i)
+        elif self.config.context_transition_function == 'experiment_10' : # fixed random sequences and two sequences of 3 blocks combined
+            self.trials_remaining_in_block -=1
+
+            if self.trials_remaining_in_block==0:
+                self.blocks_remaining_in_level_2 -=1
+                self.block_no_in_level_2 += 1
+                if self.blocks_remaining_in_level_2==0:
+                    # determine if seq1 or seq2 and the position in the sequence
+                    self.level2_i += 1 
+                    self.blocks_remaining_in_level_2 = self.blocks_in_level_2
+                    self.current_level_2 = self.rng.choice([0,1])
+                    self.block_no_in_level_2 = 0
+
+                # self.block_no_in_level_2 = self.block_i % (self.blocks_in_level_2)
+
+                # determine which context to use within sequence
+                # get the seq position 
+                sequence_position = self.block_no_in_level_2 + self.blocks_in_level_2 * self.current_level_2 
+                self.current_context = f'gauss{sequence_position}'
+                # update to the correct seed, based on wehteher it's seq1 or seq2
+                local_seed = int(self.seq1_seeds[self.block_no_in_level_2]) if self.current_level_2 else int(self.seq2_seeds[self.block_no_in_level_2])
+                self.envs[self.current_context]['env_instant'].rng = np.random.RandomState(self.config.seed + local_seed)
+                self.trial_in_block = 0
+                self.trials_remaining_in_block = self.config.max_trials_per_block
+                self.block_i += 1
+                self.env_logger['switches_ts'].append(self.ts_i)
+                self.env_logger['level_2_values'].append(self.current_level_2)
+
+
     
     
     def new_trial(self):

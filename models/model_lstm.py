@@ -37,19 +37,22 @@ class LSTM_model(nn.Module):
         elif self.config.thalamus_activation_function == 'none':
             self.thalamus_activation_function = self.thalamus_activation_function_none
     def get_LU_optimizer(self):
-        LU_optimizer = torch.optim.SGD([self.thalamus], lr=self.config.LU_lr, momentum=self.config.momentum)
+        if self.config.LU_optimizer == 'Adam':
+            LU_optimizer = torch.optim.Adam([self.thalamus], lr=self.config.LU_lr, weight_decay= self.config.l2_loss if self.config.l2_loss else 0)
+        elif self.config.LU_optimizer == 'SGD':
+            LU_optimizer = torch.optim.SGD([self.thalamus], lr=self.config.LU_lr, momentum=self.config.momentum)
         return LU_optimizer
     def thalamus_activation_function_softmax(self, x):
         if self.config.no_of_latents == 1:
-            sm = torch.softmax(x, dim = -1, temperature= self.config.activation_fxn_temp) # note: 0, 1 becomes 0.2689, 0.7311
+            sm = torch.softmax(x/self.config.activation_fxn_temp, dim = -1, ) # note: 0, 1 becomes 0.2689, 0.7311
         elif self.config.no_of_latents > 1:
             latent_size = int(self.config.thalamus_size / self.config.no_of_latents)
             # resize x to be [seq, batch, latent_size, no_of_latents]
             # then softmax along the latent_size dimension
             # then reshape back to [seq, batch, thalamus_size]
-            x = x.reshape(x.shape[0], x.shape[1], latent_size, self.config.no_of_latents)
-            sm = torch.softmax(x, dim = 2)
-            sm = sm.reshape(x.shape[0], x.shape[1], self.config.thalamus_size)
+            x = x.reshape(x.shape[0], x.shape[1], self.config.no_of_latents, latent_size, )
+            sm = torch.softmax(x, dim = 3)
+            sm = sm.reshape(x.shape[0],  x.shape[1],self.config.thalamus_size)
 
         return sm
     def thalamus_activation_function_none(self, x):
@@ -110,6 +113,10 @@ class LSTM_model(nn.Module):
             input = torch.cat([input, reward], dim=2)
         if hidden is None:
             hidden = self.hidden
+        
+        # import matplotlib.pyplot as plt
+        # fig, axes = plt.subplots(1,1, figsize=[8,2]); axes.plot(input.squeeze().detach()) ;plt.savefig('./output.jpg')    
+
         input = self.linear_in(input)
         output, hidden = self.rnn(input, hidden)
         self.hidden = hidden # update the hidden state with the new hidden state, if no hidden state is passed excplicitly to forward, this will be used next call
