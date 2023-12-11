@@ -221,7 +221,7 @@ def plot_modulations(testing_memory_buffer, testing_env, testing_losses, config,
     ax.legend()
     fig.tight_layout()
 
-def plot_dual_modulations(testing_memory_buffer, testing_env, testing_losses, config, x1=50, x2=np.inf):
+def plot_dual_modulations(testing_memory_buffer, testing_env, testing_losses, config, x1=50, x2=np.inf, replace_context2_with_level2 = False):
     # now get the gradients from the memory buffer
     grads = np.stack(testing_memory_buffer.timestep_data['thalamus_grad'])
     grads = grads.squeeze()
@@ -238,20 +238,21 @@ def plot_dual_modulations(testing_memory_buffer, testing_env, testing_losses, co
         means.append(mean)
     means = np.array(means)
 
-    max_trials = config.training_phases[0]['config']['max_trials_per_block']
-
-    context2 = np.zeros(len(obs))
-    # context2 is 1 for indices from 0 to 3*max_trials trials and the -1 from 3*max_trials trials to 6*max_trials trials and so on
-    for i in range(len(context2)):
-        if i//(3*max_trials) % 2 == 0:
-            context2[i] = 1
-        else:
-            context2[i] = -1
-    # the very first block is a special case, choosen always to be 20 and does not belong to any of the two sequences
-    # append 20 -1s to the beginning of the context2 and then remove the last 20 elements
-    context2 = np.concatenate([np.ones(20)*-1, context2])
-    context2 = context2[:-20]
-
+    if not replace_context2_with_level2:
+        context2 = np.zeros(len(obs))
+        # context2 is 1 for indices from 0 to 3*max_trials trials and the -1 from 3*max_trials trials to 6*max_trials trials and so on
+        for i in range(len(context2)):
+            if i//(3*max_trials) % 2 == 0:
+                context2[i] = 1
+            else:
+                context2[i] = -1
+        # the very first block is a special case, choosen always to be 20 and does not belong to any of the two sequences
+        # append 20 -1s to the beginning of the context2 and then remove the last 20 elements
+        context2 = np.concatenate([np.ones(20)*-1, context2])
+        context2 = context2[:-20]
+    else:
+        context2 = get_level_2_values(testing_env, testing_memory_buffer)
+        
     centered_grads = (grads - np.mean(grads, axis=0)) * 1/np.std(grads, axis=0)
     centered_means = means-np.mean(means, axis=0)
 
